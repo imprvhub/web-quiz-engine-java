@@ -1,0 +1,511 @@
+type: edu
+files:
+  - name: src/engine/WebQuizEngine.java
+    visible: true
+    text: |-
+      package engine;
+      
+      import org.springframework.boot.SpringApplication;
+      import org.springframework.boot.autoconfigure.SpringBootApplication;
+      
+      @SpringBootApplication
+      public class WebQuizEngine {
+      
+          public static void main(String[] args) {
+              SpringApplication.run(WebQuizEngine.class, args);
+          }
+      
+      }
+    learner_created: false
+  - name: src/resources/application.properties
+    visible: true
+    text: |-
+      server.port=8889
+      management.endpoints.web.exposure.include=*
+      management.endpoint.shutdown.enabled=true
+    learner_created: false
+  - name: build.gradle
+    visible: true
+    text: |
+      buildscript {
+          apply plugin: 'hyperskill'
+      
+          repositories {
+              mavenCentral()
+          }
+          dependencies {
+              classpath "org.springframework.boot:spring-boot-gradle-plugin:$hs.spring.bootVersion"
+              classpath "io.spring.gradle:dependency-management-plugin:$hs.spring.dependencyManagementVersion"
+          }
+      }
+      
+      apply plugin: 'java'
+      apply plugin: 'org.springframework.boot'
+      apply plugin: 'io.spring.dependency-management'
+      
+      repositories {
+          mavenCentral()
+      }
+      
+      sourceSets.main.resources.srcDirs = ["src/resources"]
+      
+      dependencies {
+          implementation 'org.springframework.boot:spring-boot-starter'
+          implementation 'org.springframework.boot:spring-boot-starter-actuator'
+          implementation 'org.springframework.boot:spring-boot-starter-web'
+          implementation 'javax.validation:validation-api:2.0.1.Final'
+      }
+    learner_created: false
+  - name: src/engine/IDQuiz.java
+    visible: true
+    text: |-
+      package engine;
+      
+      public class IDQuiz extends BaseQuiz {
+          private int id;
+      
+          public IDQuiz() {}
+      
+          public IDQuiz(AnswerQuiz aq, int id) {
+              super(aq);
+              this.id = id;
+          }
+      
+          public int getId() {
+              return id;
+          }
+      
+          public void setId(int id) {
+              this.id = id;
+          }
+      }
+    learner_created: false
+  - name: src/engine/SimpleFeedback.java
+    visible: true
+    text: |-
+      package engine;
+      
+      public class SimpleFeedback {
+          private boolean success;
+          private String feedback;
+      
+          public boolean isSuccess() {
+              return success;
+          }
+      
+          public void setSuccess(boolean success) {
+              this.success = success;
+          }
+      
+          public String getFeedback() {
+              return feedback;
+          }
+      
+          public void setFeedback(String feedback) {
+              this.feedback = feedback;
+          }
+      }
+    learner_created: false
+  - name: src/engine/QuizController.java
+    visible: true
+    text: |-
+      package engine;
+      
+      import org.springframework.http.HttpHeaders;
+      import org.springframework.http.HttpStatus;
+      import org.springframework.http.ResponseEntity;
+      import org.springframework.validation.FieldError;
+      import org.springframework.validation.ObjectError;
+      import org.springframework.web.bind.MethodArgumentNotValidException;
+      import org.springframework.web.bind.annotation.ExceptionHandler;
+      import org.springframework.web.bind.annotation.GetMapping;
+      import org.springframework.web.bind.annotation.PathVariable;
+      import org.springframework.web.bind.annotation.PostMapping;
+      import org.springframework.web.bind.annotation.RequestBody;
+      import org.springframework.web.bind.annotation.ResponseStatus;
+      import org.springframework.web.bind.annotation.RestController;
+      
+      import jakarta.validation.Valid;
+      import java.util.Arrays;
+      import java.util.HashMap;
+      import java.util.List;
+      import java.util.Map;
+      import java.util.stream.Collectors;
+      
+      @RestController
+      public class QuizController {
+          private static HttpHeaders jsonSpecifier;
+      
+          static {
+              jsonSpecifier = new HttpHeaders();
+              jsonSpecifier.add(HttpHeaders.CONTENT_TYPE, "application/json");
+          }
+      
+          private HashMap<Integer, AnswerQuiz> quizMap;
+          private int currentID;
+      
+          public QuizController() {
+              quizMap = new HashMap<>();
+              currentID = 1;
+          }
+      
+          @GetMapping(path = "/api/quizzes/{id}")
+          public synchronized ResponseEntity<IDQuiz> getQuizByID(@PathVariable int id) {
+              if (quizMap.containsKey(id))
+                  return ResponseEntity.ok()
+                          .headers(jsonSpecifier)
+                          .body(new IDQuiz(quizMap.get(id), id));
+              else
+                  return ResponseEntity.notFound().build();
+          }
+      
+          @GetMapping(path = "/api/quizzes")
+          public synchronized ResponseEntity<List<IDQuiz>> getAllQuizzes() {
+              var allQuizzes = quizMap.entrySet().stream()
+                      .map(e -> new IDQuiz(e.getValue(), e.getKey()))
+                      .collect(Collectors.toList());
+              return ResponseEntity.ok()
+                      .headers(jsonSpecifier)
+                      .body(allQuizzes);
+          }
+      
+          @PostMapping(path = "api/quizzes", consumes = "application/json")
+          public synchronized ResponseEntity<IDQuiz> getQuiz(@Valid @RequestBody AnswerQuiz aq) {
+              int id = currentID;
+              ++currentID;
+              if (aq.getAnswer() == null)
+                  aq.setAnswer(new int[]{});
+              quizMap.put(id, aq);
+              return ResponseEntity.ok()
+                      .headers(jsonSpecifier)
+                      .body(new IDQuiz(aq, id));
+          }
+      
+          @PostMapping(path = "/api/quizzes/{id}/solve", consumes = "application/json")
+          public synchronized ResponseEntity<SimpleFeedback> sendFeedback(@PathVariable int id, @RequestBody Answer a) {
+              if (quizMap.containsKey(id)) {
+                  if (a.getAnswer() == null)
+                      a.setAnswer(new int[]{});
+                  var set1 = Arrays.stream(quizMap.get(id).getAnswer()).boxed().collect(Collectors.toSet());
+                  var set2 = Arrays.stream(a.getAnswer()).boxed().collect(Collectors.toSet());
+                  SimpleFeedback sf = new SimpleFeedback();
+                  if (set1.equals(set2) || (quizMap.get(id).getAnswer().length == 0 && a.getAnswer().length == 0)) {
+                      sf.setSuccess(true);
+                      sf.setFeedback("Congratulations, you're right!");
+                  } else {
+                      sf.setSuccess(false);
+                      sf.setFeedback("Wrong answer! Please, try again.");
+                  }
+                  return ResponseEntity.ok()
+                          .headers(jsonSpecifier)
+                          .body(sf);
+              } else
+                  return ResponseEntity.notFound().build();
+          }
+      
+          @ExceptionHandler(MethodArgumentNotValidException.class)
+          @ResponseStatus(HttpStatus.BAD_REQUEST)
+          public synchronized Map<String, String> handleValidationExceptions(MethodArgumentNotValidException e) {
+              return e.getBindingResult().getAllErrors().stream()
+                      .collect(Collectors.toMap(error -> ((FieldError) error).getField(), ObjectError::getDefaultMessage));
+          }
+      }
+    learner_created: false
+  - name: src/engine/Answer.java
+    visible: true
+    text: |
+      package engine;
+      
+      public class Answer {
+          private int[] answer;
+      
+          public int[] getAnswer() {
+              return answer;
+          }
+      
+          public void setAnswer(int[] answer) {
+              this.answer = answer;
+          }
+      }
+    learner_created: true
+  - name: src/engine/AnswerQuiz.java
+    visible: true
+    text: |-
+      package engine;
+      
+      import java.util.Arrays;
+      import java.util.stream.Collectors;
+      
+      public class AnswerQuiz extends BaseQuiz {
+          private int[] answer;
+      
+          public AnswerQuiz() {}
+      
+          public int[] getAnswer() {
+              return answer;
+          }
+      
+          public void setAnswer(int[] answer) {
+              this.answer = answer;
+          }
+      
+          @Override
+          public String toString() {
+              return super.toString() + " answer: " + String.join(",", Arrays.stream(answer).mapToObj(Integer::toString).collect(Collectors.toList()));
+          }
+      }
+    learner_created: false
+  - name: src/engine/BaseQuiz.java
+    visible: true
+    text: |-
+      package engine;
+      
+      import jakarta.validation.constraints.NotBlank;
+      import jakarta.validation.constraints.NotNull;
+      import jakarta.validation.constraints.Size;
+      
+      
+      public class BaseQuiz {
+          @NotBlank(message = "title is required")
+          private String title;
+      
+          @NotBlank(message = "text is required")
+          private String text;
+      
+          @NotNull(message = "options cannot be null")
+          @Size(min = 2, message = "must be at least two options")
+          private String[] options;
+      
+          public BaseQuiz() {}
+      
+          public BaseQuiz(BaseQuiz other) {
+              this.title = other.title;
+              this.text = other.text;
+              this.options = other.options;
+          }
+      
+          @Override
+          public String toString() {
+              return "title: " + title + " text: " + text + " options: " + String.join(",", options);
+          }
+      
+          public String getTitle() {
+              return title;
+          }
+      
+          public void setTitle(String title) {
+              this.title = title;
+          }
+      
+          public String getText() {
+              return text;
+          }
+      
+          public void setText(String text) {
+              this.text = text;
+          }
+      
+          public String[] getOptions() {
+              return options;
+          }
+      
+          public void setOptions(String[] options) {
+              this.options = options;
+          }
+      }
+    learner_created: false
+  - name: test/tests/WebQuizEngineTest.java
+    visible: false
+    text: |
+      package tests;
+      
+      import com.google.gson.JsonElement;
+      import com.google.gson.JsonObject;
+      import engine.WebQuizEngine;
+      import org.hyperskill.hstest.dynamic.input.DynamicTesting;
+      import org.hyperskill.hstest.dynamic.input.DynamicTestingMethod;
+      import org.hyperskill.hstest.exception.outcomes.WrongAnswer;
+      import org.hyperskill.hstest.mocks.web.request.HttpRequest;
+      import org.hyperskill.hstest.mocks.web.response.HttpResponse;
+      import org.hyperskill.hstest.stage.SpringTest;
+      import org.hyperskill.hstest.testcase.CheckResult;
+      
+      import java.util.Map;
+      
+      import static org.hyperskill.hstest.common.JsonUtils.getJson;
+      import static org.hyperskill.hstest.common.JsonUtils.getPrettyJson;
+      import static org.hyperskill.hstest.testing.expect.Expectation.expect;
+      import static org.hyperskill.hstest.testing.expect.json.JsonChecker.*;
+      
+      public class WebQuizEngineTest extends SpringTest {
+          public WebQuizEngineTest() {
+              super(WebQuizEngine.class);
+          }
+      
+          static void checkStatusCode(HttpResponse resp, int status) {
+              if (resp.getStatusCode() != status) {
+                  throw new WrongAnswer(
+                      resp.getRequest().getMethod() + " " +
+                          resp.getRequest().getLocalUri() +
+                          " should respond with status code " + status + ", " +
+                          "responded: " + resp.getStatusCode() + "\n\n" +
+                          "Response body:\n\n" + resp.getContent()
+                  );
+              }
+          }
+      
+          private static int quizId1 = 0;
+          private static int quizId2 = 0;
+      
+          private static String quiz1 =
+              "{\n" +
+                  "  \"title\": \"The Java Logo\",\n" +
+                  "  \"text\": \"What is depicted on the Java logo?\",\n" +
+                  "  \"options\": [\"Robot\",\"Tea leaf\",\"Cup of coffee\",\"Bug\"],\n" +
+                  "  \"answer\": 2\n" +
+                  "}";
+      
+          private static String quiz2 =
+              "{\n" +
+                  "  \"title\": \"The Ultimate Question\",\n" +
+                  "  \"text\": \"What is the answer to the Ultimate Question of Life, the Universe and Everything?\",\n" +
+                  "  \"options\": [\"Everything goes right\",\"42\",\"2+2=4\",\"11011100\"],\n" +
+                  "  \"answer\": 1\n" +
+                  "}";
+      
+          @DynamicTestingMethod
+          public DynamicTesting[] dt = new DynamicTesting[]{
+              () -> testAllQuizzes(0),
+      
+              () -> testCreateQuiz(1),
+              () -> testQuizExists(1),
+              () -> testQuizNotExists(1),
+      
+              () -> testAllQuizzes(1),
+      
+              () -> testCreateQuiz(2),
+              () -> testQuizExists(2),
+              () -> testQuizNotExists(2),
+      
+              () -> testAllQuizzes(2),
+      
+              () -> checkQuizSuccess(quizId1, "0", false),
+              () -> checkQuizSuccess(quizId1, "1", false),
+              () -> checkQuizSuccess(quizId1, "2", true),
+              () -> checkQuizSuccess(quizId1, "3", false),
+      
+              () -> checkQuizSuccess(quizId2, "0", false),
+              () -> checkQuizSuccess(quizId2, "1", true),
+              () -> checkQuizSuccess(quizId2, "2", false),
+              () -> checkQuizSuccess(quizId2, "3", false),
+          };
+      
+          private CheckResult testCreateQuiz(int quizNum) {
+              String url = "/api/quizzes";
+              HttpResponse resp = post(url, quizNum == 1 ? quiz1 : quiz2).send();
+      
+              checkStatusCode(resp, 200);
+      
+              expect(resp.getContent()).asJson().check(
+                  isObject()
+                      .value("id", isInteger(i -> {
+                          if (quizNum == 1) {
+                              quizId1 = i;
+                          } else {
+                              quizId2 = i;
+                          }
+                          return true;
+                      }))
+                      .anyOtherValues()
+              );
+      
+              return CheckResult.correct();
+          }
+      
+          private CheckResult testQuizExists(int quizNum) {
+              int quizId = quizNum == 1 ? quizId1 : quizId2;
+              String quiz = quizNum == 1 ? quiz1 : quiz2;
+      
+              String url = "/api/quizzes/" + quizId;
+      
+              HttpResponse resp = get(url).send();
+              checkStatusCode(resp, 200);
+      
+              JsonObject rightQuiz = getJson(quiz).getAsJsonObject();
+              rightQuiz.remove("answer");
+              rightQuiz.addProperty("id", quizId);
+      
+              expect(getPrettyJson(rightQuiz)).asJson().check(
+                  isObject()
+                      .value("id", quizId)
+                      .value("title", isString())
+                      .value("text", isString())
+                      .value("options", isArray(any()))
+              );
+      
+              JsonElement json = resp.getJson();
+      
+              CheckResult wrongResponse = CheckResult.wrong(
+                  "The quiz sent to the program looked like this:\n" +
+                      getPrettyJson(rightQuiz) + "\n\n" +
+                      "But the received quiz looks like that:\n" +
+                      getPrettyJson(json)
+              );
+      
+              if (!json.isJsonObject()) {
+                  return wrongResponse;
+              }
+      
+              JsonObject obj = json.getAsJsonObject();
+      
+              if (!rightQuiz.equals(obj)) {
+                  return wrongResponse;
+              }
+      
+              return CheckResult.correct();
+          }
+      
+          private CheckResult testQuizNotExists(int quizNum) {
+              int quizId = quizNum == 1 ? quizId1 : quizId2;
+      
+              String url = "/api/quizzes/" + (quizId + 125);
+      
+              HttpResponse resp = get(url).send();
+              checkStatusCode(resp, 404);
+      
+              return CheckResult.correct();
+          }
+      
+          private CheckResult testAllQuizzes(int count) {
+              String url = "/api/quizzes";
+              HttpResponse resp = get(url).send();
+      
+              checkStatusCode(resp, 200);
+      
+              expect(resp.getContent()).asJson().check(
+                  isArray(count, isObject().anyOtherValues())
+              );
+      
+              return CheckResult.correct();
+          }
+      
+          private CheckResult checkQuizSuccess(int quizNum, String answerSent, boolean shouldResponse) {
+              String url = "/api/quizzes/" + quizNum + "/solve";
+      
+              HttpRequest req = post(url, Map.of("answer", answerSent));
+              HttpResponse resp = req.send();
+              checkStatusCode(resp, 200);
+      
+              expect(resp.getContent()).asJson().check(
+                  isObject()
+                      .value("success", shouldResponse)
+                      .value("feedback", isString(s -> !s.isBlank(), "should not be blank"))
+              );
+      
+              return CheckResult.correct();
+          }
+      }
+    learner_created: false
+feedback_link: https://hyperskill.org/learn/step/8253#comment
+status: Solved
+record: 1
